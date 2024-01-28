@@ -1,0 +1,100 @@
+---
+title: "Prediction"
+author: "Ian Wheeler"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE, }
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE)
+```
+
+## Abstract
+
+The following analysis uses random forests to predict the quality of exercise activities performed. The dataset used is the Weight Lifting
+Exercise (WLE)[^1] dataset used by permission via a Creative Commons license. The findings reveal that....
+
+## Import the Data
+
+```{r Import the data and view its dimensions}
+library(dplyr)
+library(utils)
+library(caret)
+
+
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+training <- read.csv(url)
+
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+testing <- read.csv(url)
+
+dim(training); dim(testing)
+```
+
+## Clean and pre-process the data.
+
+```{r Clean and preprocess data}
+# Remove any non-numeric columns or columns with only NA values from both training and testing data
+training <- training %>% select(-c(1:7))
+testing <- testing %>% select(-c(1:7))
+training <- training[, colSums(is.na(training))==0]
+testing <- testing[, colSums(is.na(testing))==0]
+trainNumeric <- sapply(training, is.numeric)
+testNumeric <- sapply(testing, is.numeric)
+trainFiltered <- training[, trainNumeric] ; trainFiltered$classe <- training$classe
+testFiltered <- testing[, testNumeric]
+```
+
+## Split the training data up into training, validation, and testing subsets for cross-validation.
+
+```{r Splitting Dataset}
+# Split the training data set up into training, validation, and testing sets
+dataPart <- createDataPartition(y = trainFiltered$classe, p = 0.7, list = FALSE)
+trainPart <- trainFiltered[dataPart,]; evalPart <- trainFiltered[-dataPart,]
+dataPart2 <- createDataPartition(y=trainPart$classe, p = 0.7, list = FALSE)
+trainPart <- trainPart[dataPart2,]; testPart <- trainPart[-dataPart2,]
+
+dim(trainPart); dim(evalPart); dim(testPart); dim(testFiltered)
+```
+## Use cross-validation to train the Random Forests Model.
+
+```{r Use cross-validation to train Random Forests Model}
+# Use cross-validation with 10 k-folds
+set.seed(1066)
+trnCtrl <- trainControl(method = "cv", number = 3, verboseIter = TRUE)
+
+# Train the Random Forests model 
+model_rf <- train(classe ~ ., data = trainPart, method = "rf",
+                  trContrl = trnCtrl, ntree = 200)
+model_rf$finalModel
+
+# List the most important variables in the model
+varImp(model_rf)
+```
+## Predict on Validation and Testing Sets.
+
+```{r Predict on Validation and Testing Sets}
+evalPred <- predict(model_rf, newdata = evalPart)
+testPred <- predict(model_rf, newdata = testPart)
+evalPart$classe <- as.factor(evalPart$classe)
+testPart$classe <- as.factor(testPart$classe)
+eval_cm <- confusionMatrix(evalPred, evalPart$classe)
+test_cm <- confusionMatrix(testPred, testPart$classe)
+eval_cm$overall[1:2]
+test_cm$overall[1:2]
+```
+The sample error in the validation set is `1-as.numeric(eval_cm$overall[1])` and the testing subset sample error was `1-as.numeric(test_cm$overall[1])` due to over-fitting.
+
+## Predict new values on the original testing set and table the predicted values by problem_id.
+
+```{r Predicting new values in testing set}
+# Measure accuracy of predictions against testing set
+prediction <- predict(model_rf, newdata = testFiltered)
+testFiltered$classe <- prediction
+
+# Table test cases by predicted class
+table(testFiltered$problem_id, testFiltered$classe)
+
+```
+
+[^1]: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
